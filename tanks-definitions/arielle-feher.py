@@ -1,7 +1,5 @@
-from tanks import TankController, MOVE_FORWARD, MOVE_BACKWARD, TURN_LEFT, TURN_RIGHT, SHOOT,TANK_SIZE,GameState,Tank,normalize_angle
-from math import degrees,atan2,sqrt
-import random
-
+from tanks import TankController, MOVE_FORWARD, MOVE_BACKWARD, TURN_LEFT, TURN_RIGHT, SHOOT, TANK_SIZE, GameState, Tank, normalize_angle, Bullet
+from math import degrees, atan2, sqrt
 
 class ArielleFeherTankController(TankController):
     def __init__(self, tank_id: str):
@@ -11,10 +9,22 @@ class ArielleFeherTankController(TankController):
     def id(self) -> str:
         return "arielle-feher"
 
+    def dodge_bullets(self, gamestate: GameState, my_tank: Tank) -> str:
+        for bullet in gamestate.bullets:
+            dx = bullet.position[0] - my_tank.position[0]
+            dy = bullet.position[1] - my_tank.position[1]
+            distance = sqrt(dx * dx + dy * dy)
+            if distance <= TANK_SIZE[0] * 3:
+                return MOVE_FORWARD if dy > 0 else None
+        return None
+
     def decide_what_to_do_next(self, gamestate: GameState) -> str:
         my_tank = next(tank for tank in gamestate.tanks if tank.id == self.id)
 
-        # Find the closest enemy tank
+        dodge_action = self.dodge_bullets(gamestate, my_tank)
+        if dodge_action:
+            return dodge_action
+
         closest_enemy_tank = None
         min_distance = float("inf")
         for tank in gamestate.tanks:
@@ -26,32 +36,18 @@ class ArielleFeherTankController(TankController):
                     min_distance = distance
                     closest_enemy_tank = tank
 
-        # If no enemy tanks found, move randomly
         if closest_enemy_tank is None:
-            return random.choice([TURN_LEFT, TURN_RIGHT, MOVE_FORWARD, MOVE_BACKWARD])
+            return MOVE_FORWARD
 
-        # Calculate angle to the closest enemy tank
         dx = closest_enemy_tank.position[0] - my_tank.position[0]
         dy = closest_enemy_tank.position[1] - my_tank.position[1]
         target_angle = degrees(atan2(-dy, dx))
         angle_diff = normalize_angle(target_angle - my_tank.angle)
 
-        # If angle difference is within a threshold, shoot
-        if 1 <= angle_diff <= 10 or 350 <= angle_diff <= 359:
+        if 5 <= angle_diff <= 10 or 340 <= angle_diff <= 359:
             return SHOOT
         else:
-            # Choose between turning and moving based on a probability
-            action = random.choices(
-                population=[TURN_LEFT, TURN_RIGHT, MOVE_FORWARD, MOVE_BACKWARD],
-                weights=[0.25, 0.25, 0.25, 0.25],
-                k=1
-            )[0]
-
-            # If the angle difference is more significant, turn towards the enemy
-            if angle_diff < 180 and (action == TURN_LEFT or action == TURN_RIGHT):
+            if angle_diff < 180:
                 return TURN_LEFT
-            elif angle_diff >= 180 and (action == TURN_LEFT or action == TURN_RIGHT):
-                return TURN_RIGHT
             else:
-                return action
-
+                return TURN_RIGHT

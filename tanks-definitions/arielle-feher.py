@@ -1,13 +1,16 @@
 from tkinter.tix import Tree
+from typing import List, Tuple
 
 from tanks import TankController, MOVE_FORWARD, MOVE_BACKWARD, TURN_LEFT, TURN_RIGHT, SHOOT, TANK_SIZE, GameState, Tank, normalize_angle, Bullet
 from math import degrees, atan2, sqrt
 import random
 
-
+MIN_DISTANCE = TANK_SIZE[0] * 3
 class ArielleFeherTankController(TankController):
     def __init__(self, tank_id: str):
         self.tank_id = tank_id
+        self.position_history = []  # history of positions
+        self.steps_taken = 0 # store the number of steps taken
 
     @property
     def id(self) -> str:
@@ -18,7 +21,7 @@ class ArielleFeherTankController(TankController):
             dx = bullet.position[0] - my_tank.position[0]
             dy = bullet.position[1] - my_tank.position[1]
             distance = sqrt(dx * dx + dy * dy)
-            if distance <= TANK_SIZE[0] * 3:
+            if distance <= MIN_DISTANCE:
                 bullet_angle = degrees(atan2(-dy, dx))
                 if abs(bullet_angle - my_tank.angle) < 90:
                     return random.choice([MOVE_FORWARD, TURN_LEFT])
@@ -50,27 +53,30 @@ class ArielleFeherTankController(TankController):
         closest_tree = min(gameState.trees, key=lambda tree: calculate_distance(my_tank, tree))
         return closest_tree
 
-    def retreat_from_enemy(self, gamestate: GameState, my_tank: Tank, previous_position: tuple = None,
-                           stuck_time: int = 0) -> str:
+    def find_valid_position(trees: List[Tree], tanks: List[Tank], radius: int,
+                            avoid_positions: List[Tuple[int, int]] = None) -> Tuple[int, int]:
+        while True:
+            position = tanks.get_random_position()
+            tree_collision = any(tanks.check_collision(position, tree.position, radius, tanks.TREE_RADIUS) for tree in trees)
+            tank_collision = any(tanks.check_collision(position, tank.position, radius, max(TANK_SIZE)) for tank in tanks)
+
+            if avoid_positions:
+                avoid_collision = any(
+                    tanks.check_collision(position, avoid_pos, radius, max(TANK_SIZE)) for avoid_pos in avoid_positions)
+            else:
+                avoid_collision = False
+
+            if not tree_collision and not tank_collision and not avoid_collision:
+                return position
+
+    def retreat_from_enemy(self, gamestate: GameState, my_tank: Tank) -> str:
         closest_enemy_tank = self.find_closest_enemy_tank(gamestate)
         dx_enemy = closest_enemy_tank.position[0] - my_tank.position[0]
         dy_enemy = closest_enemy_tank.position[1] - my_tank.position[1]
         distance_to_enemy = sqrt(dx_enemy * dx_enemy + dy_enemy * dy_enemy)
 
-        if distance_to_enemy <= TANK_SIZE[0] * 3:
+        if distance_to_enemy <= MIN_DISTANCE:
             # If enemy is too close, retreat
-            # Check if the tank is stuck
-            if previous_position == my_tank.position:
-                stuck_time += 1
-            else:
-                stuck_time = 0
-
-            previous_position = my_tank.position
-
-            # If the tank is stuck for more than a certain amount of time, try to steer clear of the obstacle
-            if stuck_time > 3:  # you can adjust this value
-                return random.choice([TURN_LEFT, TURN_RIGHT])
-
             # Find closest tree
             closest_tree = self.find_closest_tree(gamestate, my_tank)
 
@@ -80,7 +86,7 @@ class ArielleFeherTankController(TankController):
             distance_to_tree = sqrt(dx_tree * dx_tree + dy_tree * dy_tree)
 
             # If the tree is in the path of retreat, navigate around it
-            if distance_to_tree <= TANK_SIZE[0] * 3:
+            if distance_to_tree <= MIN_DISTANCE:
                 target_angle = degrees(atan2(-dy_tree, dx_tree))
                 angle_diff = normalize_angle(target_angle - my_tank.angle)
                 if angle_diff < 180:
@@ -97,12 +103,18 @@ class ArielleFeherTankController(TankController):
     def decide_what_to_do_next(self, gamestate: GameState) -> str:
 
         my_tank = next(tank for tank in gamestate.tanks if tank.id == self.id)
+        # Update position history and steps counter
+        if self.position_history and my_tank.position == self.position_history[-1]:
+            self.steps_taken += 1
+        else:
+            self.steps_taken = 0
+        self.position_history.append(my_tank.position)
 
         dodge_action = self.dodge_bullets(gamestate, my_tank)
         if dodge_action:
             return dodge_action
 
-        retreat_action = self.retreat_from_enemy(gamestate, my_tank, self.previous_position, self.stuck_time)
+        retreat_action = self.retreat_from_enemy(gamestate, my_tank)
         if retreat_action:
             return retreat_action
 
@@ -128,7 +140,6 @@ class ArielleFeherTankController(TankController):
 
         # if distance_to_enemy <= TANK_SIZE[0] * 3 :
         #     return MOVE_BACKWARD
-
 
         if 1 <= angle_diff <= 2 or 357 <= angle_diff <= 359:
             return SHOOT
